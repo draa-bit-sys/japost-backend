@@ -74,13 +74,11 @@ class DBWrapper:
     def execute(self, query, params=None):
         cur = self.conn.cursor()
         
-        # pg8000 pakenya %s cuy sama kek psycopg2
         query = query.replace("?", "%s")
         query = query.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
         
         cur.execute(query, params or ())
         
-        # Bikin helper fetchone sama fetchall biar sama persis kek sqlite3
         class CursorHelper:
             def __init__(self, cursor):
                 self.cur = cursor
@@ -137,39 +135,42 @@ def get_db():
 
 @app.post("/api/items")
 async def submit_item(request: Request, db: DBWrapper = Depends(get_db)):
-    """
-    FIX: Pake Request ambil mentahan Form, biar FastAPI ga cerewet (bye 422).
-    """
-    form = await request.form()
-    
-    # Ambil data pake .get() biar kalo kosong dapet default string
-    itemName = form.get("itemName", "")
-    itemCategory = form.get("itemCategory", "")
-    itemDescription = form.get("itemDescription", "")
-    stok = form.get("stok", "0")
-    harga = form.get("harga", "0")
-    
-    # Validasi custom manual
-    if not itemName or not itemCategory:
-        raise HTTPException(status_code=400, detail="Nama dan kategori wajib diisi ngab!")
-    
-    # Parsing angka super aman (kalo diketik huruf tetep tembus jadi 0)
     try:
-        stok_int = int(stok) if stok else 0
+        form = await request.form()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Gagal baca form cuy!")
+    
+    # ── JURUS SAPU JAGAT UPDATE ──
+    # Udah diajarin baca gamecategory dari html lu
+    itemName = form.get("itemName") or form.get("nama_item") or ""
+    itemCategory = form.get("gamecategory") or form.get("itemCategory") or form.get("kategori") or ""
+    itemDescription = form.get("itemDescription") or form.get("deskripsi") or ""
+    stok = form.get("stok") or "0"
+    harga = form.get("value") or form.get("harga") or "0"  # Di html lu namanya value
+    
+    # Validasi
+    if not itemName or not itemCategory:
+        keys_dikirim = list(form.keys())
+        raise HTTPException(status_code=400, detail=f"Nama/Kategori masih kosong! Key yg dikirim: {keys_dikirim}")
+    
+    # Bersihin titik dan koma (misal "50.000" jadi "50000") biar ga crash
+    try:
+        stok_clean = stok.replace(".", "").replace(",", "")
+        stok_int = int(stok_clean) if stok_clean else 0
     except Exception:
         stok_int = 0
         
     try:
-        harga_int = int(harga) if harga else 0
+        harga_clean = harga.replace(".", "").replace(",", "")
+        harga_int = int(harga_clean) if harga_clean else 0
     except Exception:
         harga_int = 0
 
     saved = []
-    # Ambil semua file "images"
-    images = form.getlist("images")
+    # Nangkep gambar
+    images = form.getlist("gambar") or form.getlist("images")
     
     for img in images:
-        # Cek apakah img beneran objek file (bukan empty string dari frontend)
         if hasattr(img, "filename") and img.filename:
             ext = img.filename.split('.')[-1]
             fname = f"{uuid.uuid4().hex}.{ext}"
