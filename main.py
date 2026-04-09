@@ -43,8 +43,7 @@ def require_auth(credentials: HTTPBasicCredentials = Depends(security)):
 DB_PATH = BASE_DIR / "japost.db"
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+   conn = sqlite3.connect(BASE_DIR / "japost.db", check_same_thread=False)
     try:
         yield conn
     finally:
