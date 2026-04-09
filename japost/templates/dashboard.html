@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Japost</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --yellow:#FFD600;--yellow-light:#FFF8CC;--yellow-dark:#C9A900;
+  --blue:#1A3A6E;--blue-mid:#2255A4;
+  --white:#fff;--bg:#F0F3FA;--card:#fff;
+  --text:#0D1B2A;--muted:#6B7C93;
+  --green:#1DA85A;--green-bg:#E6F7EE;
+  --red:#E24B4A;--red-bg:#FDEAEA;
+  --orange:#D97706;--orange-bg:#FEF3C7;
+  --radius:14px;
+}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+
+/* ── Sidebar ── */
+.sidebar{
+  position:fixed;top:0;left:0;bottom:0;width:220px;
+  background:var(--blue);
+  display:flex;flex-direction:column;
+  padding:28px 0;z-index:100;
+}
+.sidebar-logo{
+  font-family:'Syne',sans-serif;font-weight:800;font-size:18px;
+  color:var(--yellow);padding:0 24px 28px;
+  border-bottom:0.5px solid rgba(255,255,255,0.08);
+}
+.sidebar-logo span{color:rgba(255,255,255,0.5);font-size:11px;display:block;font-weight:600;margin-top:2px;letter-spacing:0.08em;text-transform:uppercase;}
+.nav{margin-top:20px;display:flex;flex-direction:column;gap:2px;padding:0 12px;}
+.nav-item{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 14px;border-radius:10px;
+  font-family:'Syne',sans-serif;font-size:13px;font-weight:600;
+  color:rgba(255,255,255,0.55);cursor:pointer;
+  transition:background 0.15s,color 0.15s;
+  text-decoration:none;
+}
+.nav-item:hover,.nav-item.active{background:rgba(255,214,0,0.12);color:var(--yellow);}
+.nav-item svg{flex-shrink:0;}
+
+/* ── Main ── */
+.main{margin-left:220px;padding:36px 32px;min-height:100vh;}
+.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;}
+.page-title{font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:var(--text);}
+.logout-btn{
+  font-family:'Syne',sans-serif;font-size:12px;font-weight:700;
+  background:transparent;border:1.5px solid #dde3ef;color:var(--muted);
+  padding:7px 16px;border-radius:8px;cursor:pointer;
+  transition:border-color 0.15s,color 0.15s;
+}
+.logout-btn:hover{border-color:var(--red);color:var(--red);}
+
+/* ── Stat cards ── */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px;}
+.stat-card{background:var(--card);border-radius:var(--radius);padding:20px 22px;border:0.5px solid #e2e8f0;}
+.stat-label{font-size:12px;color:var(--muted);font-weight:500;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.06em;}
+.stat-val{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--text);}
+.stat-card.s-yellow .stat-val{color:var(--yellow-dark);}
+.stat-card.s-green .stat-val{color:var(--green);}
+.stat-card.s-red .stat-val{color:var(--red);}
+
+/* ── Filter bar ── */
+.filter-bar{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;}
+.filter-btn{
+  font-family:'Syne',sans-serif;font-size:12px;font-weight:700;
+  padding:7px 16px;border-radius:100px;cursor:pointer;
+  border:1.5px solid #dde3ef;background:var(--white);color:var(--muted);
+  transition:all 0.15s;
+}
+.filter-btn:hover{border-color:var(--blue-mid);color:var(--blue-mid);}
+.filter-btn.active{background:var(--blue);color:var(--white);border-color:var(--blue);}
+
+/* ── Table ── */
+.table-wrap{background:var(--card);border-radius:var(--radius);border:0.5px solid #e2e8f0;overflow:hidden;}
+.table-header{padding:16px 20px;border-bottom:0.5px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;}
+.table-title{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:var(--text);}
+.search-input{
+  padding:8px 14px;border-radius:8px;border:1.5px solid #dde3ef;
+  font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text);
+  outline:none;width:220px;
+}
+.search-input:focus{border-color:var(--yellow-dark);}
+table{width:100%;border-collapse:collapse;}
+thead th{
+  font-family:'Syne',sans-serif;font-size:11px;font-weight:700;
+  color:var(--muted);text-transform:uppercase;letter-spacing:0.07em;
+  padding:12px 16px;text-align:left;border-bottom:0.5px solid #e2e8f0;
+  background:#FAFBFD;
+}
+tbody tr{border-bottom:0.5px solid #f0f3fa;transition:background 0.1s;}
+tbody tr:hover{background:#F8F9FD;}
+tbody tr:last-child{border-bottom:none;}
+td{padding:13px 16px;font-size:14px;vertical-align:middle;}
+.td-img{width:48px;height:48px;object-fit:cover;border-radius:8px;border:1.5px solid #e2e8f0;}
+.td-img-placeholder{width:48px;height:48px;border-radius:8px;background:#F0F3FA;display:flex;align-items:center;justify-content:center;}
+.item-name{font-weight:500;color:var(--text);margin-bottom:2px;}
+.item-cat{font-size:12px;color:var(--muted);}
+.price{font-family:'Syne',sans-serif;font-weight:700;color:var(--blue);}
+.stock{font-weight:500;}
+
+/* ── Status badge ── */
+.badge{display:inline-block;padding:4px 10px;border-radius:100px;font-size:11px;font-weight:700;font-family:'Syne',sans-serif;letter-spacing:0.04em;}
+.badge-pending{background:var(--orange-bg);color:var(--orange);}
+.badge-aktif{background:var(--green-bg);color:var(--green);}
+.badge-ditolak{background:var(--red-bg);color:var(--red);}
+
+/* ── Actions ── */
+.actions{display:flex;gap:6px;}
+.act-btn{
+  border:none;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;
+  font-family:'Syne',sans-serif;cursor:pointer;transition:opacity 0.15s;
+}
+.act-btn:hover{opacity:0.8;}
+.act-approve{background:var(--green-bg);color:var(--green);}
+.act-reject{background:var(--red-bg);color:var(--red);}
+.act-delete{background:#F0F3FA;color:var(--muted);}
+.act-pending{background:var(--orange-bg);color:var(--orange);}
+
+/* ── Modal ── */
+.overlay{position:fixed;inset:0;background:rgba(10,20,50,0.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px;}
+.modal{background:var(--white);border-radius:20px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(10,20,50,0.28);}
+.modal-head{padding:24px 28px 0;display:flex;justify-content:space-between;align-items:flex-start;}
+.modal-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:var(--text);}
+.modal-close{background:none;border:none;cursor:pointer;color:var(--muted);font-size:20px;line-height:1;}
+.modal-body{padding:20px 28px 28px;}
+.modal-imgs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
+.modal-img{width:80px;height:80px;object-fit:cover;border-radius:10px;border:1.5px solid #e2e8f0;}
+.modal-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid #f0f3fa;}
+.modal-row:last-child{border-bottom:none;}
+.modal-key{font-size:13px;color:var(--muted);}
+.modal-val{font-size:13px;font-weight:500;color:var(--text);text-align:right;max-width:280px;}
+
+/* ── Empty & loading ── */
+.empty{padding:48px;text-align:center;color:var(--muted);font-size:14px;}
+.loading{padding:48px;text-align:center;color:var(--muted);}
+
+.hidden{display:none!important;}
+
+/* ── Toast ── */
+.toast{
+  position:fixed;bottom:24px;right:24px;
+  background:var(--blue);color:#fff;
+  font-family:'Syne',sans-serif;font-size:13px;font-weight:600;
+  padding:12px 20px;border-radius:10px;
+  box-shadow:0 8px 28px rgba(10,20,50,0.25);
+  transform:translateY(80px);opacity:0;
+  transition:transform 0.3s,opacity 0.3s;
+  z-index:300;
+}
+.toast.show{transform:translateY(0);opacity:1;}
+
+@media(max-width:900px){
+  .stats{grid-template-columns:repeat(2,1fr);}
+  .sidebar{width:64px;}
+  .sidebar-logo{padding:0 0 28px;text-align:center;font-size:0;}
+  .sidebar-logo::before{content:'JP';font-size:16px;color:var(--yellow);font-family:'Syne',sans-serif;font-weight:800;}
+  .nav-item span{display:none;}
+  .main{margin-left:64px;padding:24px 16px;}
+}
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-logo">Japost<span>Dashboard</span></div>
+  <nav class="nav">
+    <a class="nav-item active" onclick="setFilter(null)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <span>Semua Item</span>
+    </a>
+    <a class="nav-item" onclick="setFilter('pending')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <span>Pending</span>
+    </a>
+    <a class="nav-item" onclick="setFilter('aktif')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      <span>Aktif</span>
+    </a>
+    <a class="nav-item" onclick="setFilter('ditolak')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+      <span>Ditolak</span>
+    </a>
+  </nav>
+</aside>
+
+<!-- Main -->
+<main class="main">
+  <div class="top-bar">
+    <div class="page-title">Dashboard Japost</div>
+    <button class="logout-btn" onclick="window.location.reload()">Refresh</button>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat-card"><div class="stat-label">Total Item</div><div class="stat-val" id="s-total">—</div></div>
+    <div class="stat-card s-yellow"><div class="stat-label">Pending</div><div class="stat-val" id="s-pending">—</div></div>
+    <div class="stat-card s-green"><div class="stat-label">Aktif</div><div class="stat-val" id="s-aktif">—</div></div>
+    <div class="stat-card s-red"><div class="stat-label">Ditolak</div><div class="stat-val" id="s-ditolak">—</div></div>
+  </div>
+
+  <!-- Filter + Search -->
+  <div class="filter-bar">
+    <button class="filter-btn active" id="fb-all"   onclick="setFilter(null)">Semua</button>
+    <button class="filter-btn"        id="fb-pending" onclick="setFilter('pending')">Pending</button>
+    <button class="filter-btn"        id="fb-aktif"   onclick="setFilter('aktif')">Aktif</button>
+    <button class="filter-btn"        id="fb-ditolak" onclick="setFilter('ditolak')">Ditolak</button>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <div class="table-header">
+      <div class="table-title" id="table-title">Semua Item</div>
+      <input class="search-input" id="search" placeholder="Cari nama / kategori..." oninput="renderTable()">
+    </div>
+    <div id="table-container"><div class="loading">Memuat data...</div></div>
+  </div>
+</main>
+
+<!-- Modal detail -->
+<div class="overlay hidden" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="modal-title">Detail Item</div>
+      <button class="modal-close" onclick="closeModalDirect()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '';  // same origin
+let allItems = [];
+let currentFilter = null;
+
+// ── Auth header ──
+function authHeader() {
+  // Browser will prompt basic auth on first 401
+  return {};
+}
+
+// ── Fetch stats ──
+async function fetchStats() {
+  try {
+    const r = await fetch(`${API}/api/stats`);
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('s-total').textContent   = d.total;
+    document.getElementById('s-pending').textContent = d.pending;
+    document.getElementById('s-aktif').textContent   = d.aktif;
+    document.getElementById('s-ditolak').textContent = d.ditolak;
+  } catch(e) {}
+}
+
+// ── Fetch items ──
+async function fetchItems() {
+  const url = currentFilter ? `${API}/api/items?status=${currentFilter}` : `${API}/api/items`;
+  const r = await fetch(url);
+  if (r.status === 401) { showToast('Login diperlukan — reload halaman'); return; }
+  allItems = await r.json();
+  renderTable();
+}
+
+// ── Render table ──
+function renderTable() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const rows = allItems.filter(i =>
+    i.nama_item.toLowerCase().includes(q) ||
+    i.kategori.toLowerCase().includes(q)
+  );
+
+  if (rows.length === 0) {
+    document.getElementById('table-container').innerHTML = `<div class="empty">Belum ada item</div>`;
+    return;
+  }
+
+  let html = `<table>
+    <thead><tr>
+      <th>Gambar</th><th>Item</th><th>Stok</th><th>Harga</th><th>Status</th><th>Tanggal</th><th>Aksi</th>
+    </tr></thead><tbody>`;
+
+  rows.forEach(item => {
+    const img = item.gambar.length
+      ? `<img class="td-img" src="${item.gambar[0]}" alt="">`
+      : `<div class="td-img-placeholder"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A0AEC0" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`;
+
+    const badge = `<span class="badge badge-${item.status}">${item.status}</span>`;
+    const harga = 'Rp ' + Number(item.harga).toLocaleString('id-ID');
+    const tgl   = item.created_at.split('T')[0];
+
+    const approveBtn = item.status !== 'aktif'
+      ? `<button class="act-btn act-approve" onclick="updateStatus('${item.id}','aktif')">Aktifkan</button>` : '';
+    const rejectBtn = item.status !== 'ditolak'
+      ? `<button class="act-btn act-reject" onclick="updateStatus('${item.id}','ditolak')">Tolak</button>` : '';
+    const pendingBtn = item.status !== 'pending'
+      ? `<button class="act-btn act-pending" onclick="updateStatus('${item.id}','pending')">Pending</button>` : '';
+
+    html += `<tr onclick="openModal('${item.id}')" style="cursor:pointer">
+      <td>${img}</td>
+      <td><div class="item-name">${esc(item.nama_item)}</div><div class="item-cat">${esc(item.kategori)}</div></td>
+      <td><span class="stock">${item.stok}</span></td>
+      <td><span class="price">${harga}</span></td>
+      <td>${badge}</td>
+      <td style="color:var(--muted);font-size:13px">${tgl}</td>
+      <td onclick="event.stopPropagation()">
+        <div class="actions">
+          ${approveBtn}${rejectBtn}${pendingBtn}
+          <button class="act-btn act-delete" onclick="deleteItem('${item.id}')">Hapus</button>
+        </div>
+      </td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  document.getElementById('table-container').innerHTML = html;
+}
+
+// ── Filter ──
+function setFilter(f) {
+  currentFilter = f;
+  ['all','pending','aktif','ditolak'].forEach(k => {
+    const btn = document.getElementById(`fb-${k}`);
+    if (btn) btn.classList.toggle('active', (f === null && k === 'all') || f === k);
+  });
+  document.querySelectorAll('.nav-item').forEach((el, i) => {
+    el.classList.toggle('active', i === (['all','pending','aktif','ditolak'].indexOf(f ?? 'all')));
+  });
+  const titles = {null:'Semua Item', pending:'Item Pending', aktif:'Item Aktif', ditolak:'Item Ditolak'};
+  document.getElementById('table-title').textContent = titles[f] ?? 'Semua Item';
+  fetchItems();
+}
+
+// ── Update status ──
+async function updateStatus(id, status) {
+  const r = await fetch(`${API}/api/items/${id}/status`, {
+    method: 'PATCH',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({status})
+  });
+  if (r.ok) { showToast(`Status diubah → ${status}`); fetchItems(); fetchStats(); }
+}
+
+// ── Delete ──
+async function deleteItem(id) {
+  if (!confirm('Hapus item ini?')) return;
+  const r = await fetch(`${API}/api/items/${id}`, {method:'DELETE'});
+  if (r.ok) { showToast('Item dihapus'); fetchItems(); fetchStats(); }
+}
+
+// ── Modal ──
+async function openModal(id) {
+  const item = allItems.find(i => i.id === id);
+  if (!item) return;
+  document.getElementById('modal-title').textContent = item.nama_item;
+
+  const imgs = item.gambar.map(src => `<img class="modal-img" src="${src}">`).join('') ||
+    '<span style="color:var(--muted);font-size:13px">Tidak ada gambar</span>';
+
+  const harga = 'Rp ' + Number(item.harga).toLocaleString('id-ID');
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="modal-imgs">${imgs}</div>
+    <div class="modal-row"><span class="modal-key">ID</span><span class="modal-val" style="font-family:monospace;font-size:12px">${item.id}</span></div>
+    <div class="modal-row"><span class="modal-key">Kategori</span><span class="modal-val">${esc(item.kategori)}</span></div>
+    <div class="modal-row"><span class="modal-key">Deskripsi</span><span class="modal-val">${esc(item.deskripsi || '-')}</span></div>
+    <div class="modal-row"><span class="modal-key">Stok</span><span class="modal-val">${item.stok}</span></div>
+    <div class="modal-row"><span class="modal-key">Harga</span><span class="modal-val">${harga}</span></div>
+    <div class="modal-row"><span class="modal-key">Status</span><span class="modal-val"><span class="badge badge-${item.status}">${item.status}</span></span></div>
+    <div class="modal-row"><span class="modal-key">Dibuat</span><span class="modal-val">${item.created_at.replace('T',' ')}</span></div>
+  `;
+  document.getElementById('modal-overlay').classList.remove('hidden');
+}
+
+function closeModal(e) { if (e.target.id === 'modal-overlay') closeModalDirect(); }
+function closeModalDirect() { document.getElementById('modal-overlay').classList.add('hidden'); }
+
+// ── Toast ──
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Init ──
+fetchStats();
+fetchItems();
+setInterval(() => { fetchStats(); fetchItems(); }, 30000);
+</script>
+</body>
+</html>
