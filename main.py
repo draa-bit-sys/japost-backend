@@ -7,8 +7,7 @@ from typing import Optional, List
 import os, shutil, secrets, uuid
 from datetime import datetime
 from pathlib import Path
-import psycopg2
-import psycopg2.extras
+import pg8000.dbapi
 
 app = FastAPI(title="Japost Itemku API")
 
@@ -44,23 +43,55 @@ def require_auth(credentials: HTTPBasicCredentials = Depends(security)):
 # ── Database PostgreSQL Setup ──
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Parsing manual url postgresql://user:pass@host:port/dbname 
+def parse_db_url(url):
+    if not url: return {}
+    url = url.replace("postgresql://", "")
+    user_pass, host_port_db = url.split("@")
+    user, password = user_pass.split(":")
+    host_port, database = host_port_db.split("/")
+    host, port = host_port.split(":")
+    return {
+        "user": user,
+        "password": password,
+        "host": host,
+        "port": int(port),
+        "database": database
+    }
+
 class DBWrapper:
     """
-    Wrapper jenius biar kodingan SQLite lama lu tetep jalan di Postgres
-    tanpa perlu rombak Endpoint logic sama sekali.
+    Wrapper jenius pg8000 (100% Python). Anti error libpq.so.5!
     """
     def __init__(self, conn):
         self.conn = conn
 
     def execute(self, query, params=None):
-        cur = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        # 1. Postgres pake %s, SQLite pake ?
+        cur = self.conn.cursor()
+        
+        # pg8000 tuh pakenya %s cuy sama kek psycopg2
         query = query.replace("?", "%s")
-        # 2. Convert syntax ID dari gaya SQLite ke gaya Postgres
         query = query.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
         
         cur.execute(query, params or ())
-        return cur
+        
+        # Bikin helper fetchone sama fetchall biar sama persis kek sqlite3
+        class CursorHelper:
+            def __init__(self, cursor):
+                self.cur = cursor
+                
+            def fetchone(self):
+                row = self.cur.fetchone()
+                if not row: return None
+                cols = [desc[0] for desc in self.cur.description]
+                return dict(zip(cols, row))
+                
+            def fetchall(self):
+                rows = self.cur.fetchall()
+                cols = [desc[0] for desc in self.cur.description]
+                return [dict(zip(cols, row)) for row in rows]
+                
+        return CursorHelper(cur)
 
     def commit(self):
         self.conn.commit()
@@ -73,11 +104,10 @@ def get_db():
         print("⚠️ ERROR: DATABASE_URL belom diset ngab di Variables Railway!")
         raise Exception("Database belom dikonek!")
     
-    # Setup koneksi ke Postgres
-    conn = psycopg2.connect(DATABASE_URL)
+    db_args = parse_db_url(DATABASE_URL)
+    conn = pg8000.dbapi.connect(**db_args)
     wrapper = DBWrapper(conn)
     
-    # Init Table (dijalankan pas tiap koneksi dapet, aman karena IF NOT EXISTS)
     wrapper.execute("""
         CREATE TABLE IF NOT EXISTS items (
             id TEXT PRIMARY KEY,
@@ -126,7 +156,7 @@ async def submit_item(
     db.execute(
         """INSERT INTO items 
            (id, nama_item, kategori, deskripsi, stok, harga, gambar, created_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""", # Di Postgres langsung pake %s, soalnya ini DBWrapper nerjemahin manual
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""", 
         (item_id, itemName, itemCategory, itemDescription, stok, harga, "|".join(saved), now)
     )
     db.commit()
@@ -175,11 +205,18 @@ def delete_item(item_id: str, db: DBWrapper = Depends(get_db), _: str = Depends(
 
 @app.get("/api/stats")
 def stats(db: DBWrapper = Depends(get_db), _: str = Depends(require_auth)):
-    total   = db.execute("SELECT COUNT(*) FROM items").fetchone()[0]
-    pending = db.execute("SELECT COUNT(*) FROM items WHERE status='pending'").fetchone()[0]
-    aktif   = db.execute("SELECT COUNT(*) FROM items WHERE status='aktif'").fetchone()[0]
-    ditolak = db.execute("SELECT COUNT(*) FROM items WHERE status='ditolak'").fetchone()[0]
-    return {"total": total, "pending": pending, "aktif": aktif, "ditolak": ditolak}
+    # pg8000 balikin value count() sebagai integer langsung klo di index 0 tapi key-nya pake ngambil iterasi ke row
+    total_row   = db.execute("SELECT COUNT(*) FROM items").cur.fetchone()
+    pending_row = db.execute("SELECT COUNT(*) FROM items WHERE status='pending'").cur.fetchone()
+    aktif_row   = db.execute("SELECT COUNT(*) FROM items WHERE status='aktif'").cur.fetchone()
+    ditolak_row = db.execute("SELECT COUNT(*) FROM items WHERE status='ditolak'").cur.fetchone()
+    
+    return {
+        "total": total_row[0] if total_row else 0, 
+        "pending": pending_row[0] if pending_row else 0, 
+        "aktif": aktif_row[0] if aktif_row else 0, 
+        "ditolak": ditolak_row[0] if ditolak_row else 0
+    }
 
 
 # ── Serve pages ──
