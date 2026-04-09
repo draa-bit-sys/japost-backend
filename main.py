@@ -23,7 +23,7 @@ UPLOAD_DIR = BASE_DIR / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
-# ── Auth (simple basic auth untuk dashboard) ──
+# ── Auth ──
 security = HTTPBasic()
 DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
 DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "japost123")
@@ -54,17 +54,25 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS items (
-            id          TEXT PRIMARY KEY,
-            nama_item   TEXT NOT NULL,
-            kategori    TEXT NOT NULL,
-            deskripsi   TEXT,
-            stok        INTEGER DEFAULT 0,
-            harga       INTEGER DEFAULT 0,
-            gambar      TEXT,
-            status      TEXT DEFAULT 'pending',
-            created_at  TEXT NOT NULL
+            id               TEXT PRIMARY KEY,
+            nama_penjual     TEXT NOT NULL DEFAULT 'Anonim',
+            kontak_penjual   TEXT NOT NULL DEFAULT '-',
+            nama_item        TEXT NOT NULL,
+            kategori         TEXT NOT NULL,
+            deskripsi        TEXT,
+            stok             INTEGER DEFAULT 0,
+            harga            INTEGER DEFAULT 0,
+            gambar           TEXT,
+            status           TEXT DEFAULT 'pending',
+            created_at       TEXT NOT NULL
         )
     """)
+    # Migrasi untuk database lama
+    for col, default in [("nama_penjual", "'Anonim'"), ("kontak_penjual", "'-'")]:
+        try:
+            conn.execute(f"ALTER TABLE items ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
+        except:
+            pass
     conn.commit()
     conn.close()
 
@@ -73,8 +81,12 @@ init_db()
 # ── Helper ──
 def row_to_dict(row):
     d = dict(row)
-    # Pecah string gambar jadi list
     d["gambar"] = d["gambar"].split("|") if d.get("gambar") else []
+    return d
+
+def row_to_public(row):
+    d = row_to_dict(row)
+    d.pop("kontak_penjual", None)
     return d
 
 # ════════════════════════════════════
@@ -83,18 +95,18 @@ def row_to_dict(row):
 
 @app.post("/api/items", status_code=201)
 async def submit_item(
-    itemName:        str           = Form(...),
-    gamecategory:    str           = Form(...),
-    itemDescription: str           = Form(""),
-    stok:            int           = Form(0),
-    value:           str           = Form("0"),
+    namaPenjual:     str              = Form(...),
+    kontakPenjual:   str              = Form(...),
+    itemName:        str              = Form(...),
+    gamecategory:    str              = Form(...),
+    itemDescription: str              = Form(""),
+    stok:            int              = Form(0),
+    value:           str              = Form("0"),
     gambar:          List[UploadFile] = File(default=[]),
     db: sqlite3.Connection = Depends(get_db)
 ):
-    # Bersihkan format harga "50.000" → 50000
     harga = int(value.replace(".", "").replace(",", "")) if value else 0
 
-    # Simpan gambar
     saved = []
     for f in gambar:
         if f.filename:
@@ -109,14 +121,43 @@ async def submit_item(
     now     = datetime.now().isoformat(timespec="seconds")
 
     db.execute(
-        """INSERT INTO items (id, nama_item, kategori, deskripsi, stok, harga, gambar, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
-        (item_id, itemName, gamecategory, itemDescription, stok, harga, "|".join(saved), now)
+        """INSERT INTO items
+           (id, nama_penjual, kontak_penjual, nama_item, kategori, deskripsi, stok, harga, gambar, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+        (item_id, namaPenjual, kontakPenjual, itemName, gamecategory,
+         itemDescription, stok, harga, "|".join(saved), now)
     )
     db.commit()
     return {"ok": True, "id": item_id}
 
 
+# ── Public endpoints (tanpa auth) ──
+@app.get("/api/public/items")
+def public_items(
+    kategori: Optional[str] = None,
+    db: sqlite3.Connection = Depends(get_db)
+):
+    if kategori:
+        rows = db.execute(
+            "SELECT * FROM items WHERE status='aktif' AND kategori LIKE ? ORDER BY created_at DESC",
+            (f"%{kategori}%",)
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM items WHERE status='aktif' ORDER BY created_at DESC"
+        ).fetchall()
+    return [row_to_public(r) for r in rows]
+
+
+@app.get("/api/public/kategori")
+def public_kategori(db: sqlite3.Connection = Depends(get_db)):
+    rows = db.execute(
+        "SELECT DISTINCT kategori FROM items WHERE status='aktif' ORDER BY kategori"
+    ).fetchall()
+    return [r["kategori"] for r in rows]
+
+
+# ── Admin endpoints (butuh auth) ──
 @app.get("/api/items")
 def list_items(
     status: Optional[str] = None,
@@ -158,7 +199,6 @@ def delete_item(item_id: str, db: sqlite3.Connection = Depends(get_db), _: str =
     row = db.execute("SELECT gambar FROM items WHERE id=?", (item_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Item tidak ditemukan")
-    # Hapus file gambar
     for path in (row["gambar"] or "").split("|"):
         if path:
             full = BASE_DIR / path.lstrip("/")
@@ -178,12 +218,20 @@ def stats(db: sqlite3.Connection = Depends(get_db), _: str = Depends(require_aut
     return {"total": total, "pending": pending, "aktif": aktif, "ditolak": ditolak}
 
 
-# ── Serve dashboard ──
+# ── Serve pages ──
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
-    html = (BASE_DIR / "templates" / "dashboard.html").read_text()
-    return HTMLResponse(html)
+    return HTMLResponse((BASE_DIR / "templates" / "dashboard.html").read_text())
+
+@app.get("/katalog", response_class=HTMLResponse)
+def katalog():
+    return HTMLResponse((BASE_DIR / "templates" / "katalog.html").read_text())
+
+@app.get("/konfirmasi", response_class=HTMLResponse)
+def konfirmasi():
+    return HTMLResponse((BASE_DIR / "templates" / "konfirmasi.html").read_text())
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return HTMLResponse("<p>API aktif. Buka <a href='/dashboard'>dashboard</a> atau <a href='/docs'>docs</a>.</p>")
+    return HTMLResponse("<p>API aktif. Buka <a href='/dashboard'>dashboard</a>, <a href='/katalog'>katalog</a>, atau <a href='/docs'>docs</a>.</p>")
+    
