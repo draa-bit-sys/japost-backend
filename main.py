@@ -4,9 +4,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from typing import Optional, List
-import sqlite3, os, shutil, secrets, uuid
+import os, shutil, secrets, uuid
 from datetime import datetime
 from pathlib import Path
+import psycopg2
+import psycopg2.extras
 
 app = FastAPI(title="Japost Itemku API")
 
@@ -37,179 +39,142 @@ def require_auth(credentials: HTTPBasicCredentials = Depends(security)):
             detail="Login salah",
             headers={"WWW-Authenticate": "Basic"},
         )
-    return credentials.username
+    return credentials
 
-# ── Database ──
-DB_PATH = BASE_DIR / "japost.db"
+# ── Database PostgreSQL Setup ──
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+class DBWrapper:
+    """
+    Wrapper jenius biar kodingan SQLite lama lu tetep jalan di Postgres
+    tanpa perlu rombak Endpoint logic sama sekali.
+    """
+    def __init__(self, conn):
+        self.conn = conn
+
+    def execute(self, query, params=None):
+        cur = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        # 1. Postgres pake %s, SQLite pake ?
+        query = query.replace("?", "%s")
+        # 2. Convert syntax ID dari gaya SQLite ke gaya Postgres
+        query = query.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+        
+        cur.execute(query, params or ())
+        return cur
+
+    def commit(self):
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()
 
 def get_db():
-   conn = sqlite3.connect(BASE_DIR / "japost.db", check_same_thread=False)
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
+    if not DATABASE_URL:
+        print("⚠️ ERROR: DATABASE_URL belom diset ngab di Variables Railway!")
+        raise Exception("Database belom dikonek!")
+    
+    # Setup koneksi ke Postgres
+    conn = psycopg2.connect(DATABASE_URL)
+    wrapper = DBWrapper(conn)
+    
+    # Init Table (dijalankan pas tiap koneksi dapet, aman karena IF NOT EXISTS)
+    wrapper.execute("""
         CREATE TABLE IF NOT EXISTS items (
-            id               TEXT PRIMARY KEY,
-            nama_penjual     TEXT NOT NULL DEFAULT 'Anonim',
-            kontak_penjual   TEXT NOT NULL DEFAULT '-',
-            nama_item        TEXT NOT NULL,
-            kategori         TEXT NOT NULL,
-            deskripsi        TEXT,
-            stok             INTEGER DEFAULT 0,
-            harga            INTEGER DEFAULT 0,
-            gambar           TEXT,
-            status           TEXT DEFAULT 'pending',
-            created_at       TEXT NOT NULL
+            id TEXT PRIMARY KEY,
+            nama_item TEXT NOT NULL,
+            kategori TEXT NOT NULL,
+            deskripsi TEXT,
+            stok INTEGER NOT NULL,
+            harga INTEGER NOT NULL,
+            gambar TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT NOT NULL
         )
     """)
-    # Migrasi untuk database lama
-    for col, default in [("nama_penjual", "'Anonim'"), ("kontak_penjual", "'-'")]:
-        try:
-            conn.execute(f"ALTER TABLE items ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
-        except:
-            pass
-    conn.commit()
-    conn.close()
+    wrapper.commit()
 
-init_db()
+    try:
+        yield wrapper
+    finally:
+        wrapper.close()
 
-# ── Helper ──
-def row_to_dict(row):
-    d = dict(row)
-    d["gambar"] = d["gambar"].split("|") if d.get("gambar") else []
-    return d
+# ── Endpoints ──
 
-def row_to_public(row):
-    d = row_to_dict(row)
-    d.pop("kontak_penjual", None)
-    return d
-
-# ════════════════════════════════════
-#  API ENDPOINTS
-# ════════════════════════════════════
-
-@app.post("/api/items", status_code=201)
+@app.post("/api/items")
 async def submit_item(
-    namaPenjual:     str              = Form(...),
-    kontakPenjual:   str              = Form(...),
-    itemName:        str              = Form(...),
-    gamecategory:    str              = Form(...),
-    itemDescription: str              = Form(""),
-    stok:            int              = Form(0),
-    value:           str              = Form("0"),
-    gambar:          List[UploadFile] = File(default=[]),
-    db: sqlite3.Connection = Depends(get_db)
+    itemName: str = Form(...),
+    itemCategory: str = Form(...),
+    itemDescription: str = Form(""),
+    stok: int = Form(...),
+    harga: int = Form(...),
+    images: List[UploadFile] = File([]),
+    db: DBWrapper = Depends(get_db)
 ):
-    harga = int(value.replace(".", "").replace(",", "")) if value else 0
-
     saved = []
-    for f in gambar:
-        if f.filename:
-            ext  = Path(f.filename).suffix
-            name = f"{uuid.uuid4().hex}{ext}"
-            dest = UPLOAD_DIR / name
-            with open(dest, "wb") as out:
-                shutil.copyfileobj(f.file, out)
-            saved.append(f"/static/uploads/{name}")
-
-    item_id = uuid.uuid4().hex[:12]
-    now     = datetime.now().isoformat(timespec="seconds")
-
+    for img in images:
+        if not img.filename: continue
+        ext = img.filename.split('.')[-1]
+        fname = f"{uuid.uuid4().hex}.{ext}"
+        path = UPLOAD_DIR / fname
+        with path.open("wb") as buffer:
+            shutil.copyfileobj(img.file, buffer)
+        saved.append(f"/static/uploads/{fname}")
+    
+    item_id = uuid.uuid4().hex[:8]
+    now = datetime.now().isoformat()
+    
     db.execute(
-        """INSERT INTO items
-           (id, nama_penjual, kontak_penjual, nama_item, kategori, deskripsi, stok, harga, gambar, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
-        (item_id, namaPenjual, kontakPenjual, itemName, gamecategory,
-         itemDescription, stok, harga, "|".join(saved), now)
+        """INSERT INTO items 
+           (id, nama_item, kategori, deskripsi, stok, harga, gambar, created_at)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""", # Di Postgres langsung pake %s, soalnya ini DBWrapper nerjemahin manual
+        (item_id, itemName, itemCategory, itemDescription, stok, harga, "|".join(saved), now)
     )
     db.commit()
     return {"ok": True, "id": item_id}
 
 
-# ── Public endpoints (tanpa auth) ──
-@app.get("/api/public/items")
-def public_items(
-    kategori: Optional[str] = None,
-    db: sqlite3.Connection = Depends(get_db)
-):
-    if kategori:
-        rows = db.execute(
-            "SELECT * FROM items WHERE status='aktif' AND kategori LIKE ? ORDER BY created_at DESC",
-            (f"%{kategori}%",)
-        ).fetchall()
-    else:
-        rows = db.execute(
-            "SELECT * FROM items WHERE status='aktif' ORDER BY created_at DESC"
-        ).fetchall()
-    return [row_to_public(r) for r in rows]
-
-
-@app.get("/api/public/kategori")
-def public_kategori(db: sqlite3.Connection = Depends(get_db)):
-    rows = db.execute(
-        "SELECT DISTINCT kategori FROM items WHERE status='aktif' ORDER BY kategori"
-    ).fetchall()
-    return [r["kategori"] for r in rows]
-
-
-# ── Admin endpoints (butuh auth) ──
 @app.get("/api/items")
-def list_items(
-    status: Optional[str] = None,
-    db: sqlite3.Connection = Depends(get_db),
-    _: str = Depends(require_auth)
-):
+def list_items(status: Optional[str] = None, db: DBWrapper = Depends(get_db), _: str = Depends(require_auth)):
     if status:
-        rows = db.execute("SELECT * FROM items WHERE status=? ORDER BY created_at DESC", (status,)).fetchall()
+        rows = db.execute("SELECT * FROM items WHERE status=%s ORDER BY created_at DESC", (status,)).fetchall()
     else:
         rows = db.execute("SELECT * FROM items ORDER BY created_at DESC").fetchall()
-    return [row_to_dict(r) for r in rows]
-
-
-@app.get("/api/items/{item_id}")
-def get_item(item_id: str, db: sqlite3.Connection = Depends(get_db), _: str = Depends(require_auth)):
-    row = db.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
-    if not row:
-        raise HTTPException(404, "Item tidak ditemukan")
-    return row_to_dict(row)
+    
+    res = []
+    for r in rows:
+        d = dict(r)
+        d["gambar"] = [g for g in (d["gambar"] or "").split("|") if g]
+        res.append(d)
+    return res
 
 
 @app.patch("/api/items/{item_id}/status")
-def update_status(
-    item_id: str,
-    body: dict,
-    db: sqlite3.Connection = Depends(get_db),
-    _: str = Depends(require_auth)
-):
-    new_status = body.get("status")
-    if new_status not in ("pending", "aktif", "ditolak"):
-        raise HTTPException(400, "Status tidak valid")
-    db.execute("UPDATE items SET status=? WHERE id=?", (new_status, item_id))
+def update_status(item_id: str, payload: dict, db: DBWrapper = Depends(get_db), _: str = Depends(require_auth)):
+    new_status = payload.get("status")
+    if new_status not in ["pending", "aktif", "ditolak"]:
+        raise HTTPException(400, "Status nggak valid")
+    db.execute("UPDATE items SET status=%s WHERE id=%s", (new_status, item_id))
     db.commit()
     return {"ok": True}
 
 
 @app.delete("/api/items/{item_id}")
-def delete_item(item_id: str, db: sqlite3.Connection = Depends(get_db), _: str = Depends(require_auth)):
-    row = db.execute("SELECT gambar FROM items WHERE id=?", (item_id,)).fetchone()
+def delete_item(item_id: str, db: DBWrapper = Depends(get_db), _: str = Depends(require_auth)):
+    row = db.execute("SELECT gambar FROM items WHERE id=%s", (item_id,)).fetchone()
     if not row:
-        raise HTTPException(404, "Item tidak ditemukan")
+        raise HTTPException(404, "Item nggak ditemukan")
     for path in (row["gambar"] or "").split("|"):
         if path:
             full = BASE_DIR / path.lstrip("/")
             if full.exists():
                 full.unlink()
-    db.execute("DELETE FROM items WHERE id=?", (item_id,))
+    db.execute("DELETE FROM items WHERE id=%s", (item_id,))
     db.commit()
     return {"ok": True}
 
 
 @app.get("/api/stats")
-def stats(db: sqlite3.Connection = Depends(get_db), _: str = Depends(require_auth)):
+def stats(db: DBWrapper = Depends(get_db), _: str = Depends(require_auth)):
     total   = db.execute("SELECT COUNT(*) FROM items").fetchone()[0]
     pending = db.execute("SELECT COUNT(*) FROM items WHERE status='pending'").fetchone()[0]
     aktif   = db.execute("SELECT COUNT(*) FROM items WHERE status='aktif'").fetchone()[0]
@@ -232,5 +197,4 @@ def konfirmasi():
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return HTMLResponse("<p>API aktif. Buka <a href='/dashboard'>dashboard</a>, <a href='/katalog'>katalog</a>, atau <a href='/docs'>docs</a>.</p>")
-    
+    return HTMLResponse((BASE_DIR / "templates" / "post.html").read_text())
