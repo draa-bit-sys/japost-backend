@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Depends, status
+from fastapi import FastAPI, Form, File, UploadFile, HTTPException, Depends, status, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,6 +51,11 @@ def parse_db_url(url):
     user, password = user_pass.split(":")
     host_port, database = host_port_db.split("/")
     host, port = host_port.split(":")
+    
+    # Hapus embel-embel query string dari Railway (misal: ?sslmode=disable)
+    if "?" in database:
+        database = database.split("?")[0]
+        
     return {
         "user": user,
         "password": password,
@@ -69,7 +74,7 @@ class DBWrapper:
     def execute(self, query, params=None):
         cur = self.conn.cursor()
         
-        # pg8000 tuh pakenya %s cuy sama kek psycopg2
+        # pg8000 pakenya %s cuy sama kek psycopg2
         query = query.replace("?", "%s")
         query = query.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
         
@@ -131,24 +136,47 @@ def get_db():
 # ── Endpoints ──
 
 @app.post("/api/items")
-async def submit_item(
-    itemName: str = Form(...),
-    itemCategory: str = Form(...),
-    itemDescription: str = Form(""),
-    stok: int = Form(...),
-    harga: int = Form(...),
-    images: List[UploadFile] = File([]),
-    db: DBWrapper = Depends(get_db)
-):
+async def submit_item(request: Request, db: DBWrapper = Depends(get_db)):
+    """
+    FIX: Pake Request ambil mentahan Form, biar FastAPI ga cerewet (bye 422).
+    """
+    form = await request.form()
+    
+    # Ambil data pake .get() biar kalo kosong dapet default string
+    itemName = form.get("itemName", "")
+    itemCategory = form.get("itemCategory", "")
+    itemDescription = form.get("itemDescription", "")
+    stok = form.get("stok", "0")
+    harga = form.get("harga", "0")
+    
+    # Validasi custom manual
+    if not itemName or not itemCategory:
+        raise HTTPException(status_code=400, detail="Nama dan kategori wajib diisi ngab!")
+    
+    # Parsing angka super aman (kalo diketik huruf tetep tembus jadi 0)
+    try:
+        stok_int = int(stok) if stok else 0
+    except Exception:
+        stok_int = 0
+        
+    try:
+        harga_int = int(harga) if harga else 0
+    except Exception:
+        harga_int = 0
+
     saved = []
+    # Ambil semua file "images"
+    images = form.getlist("images")
+    
     for img in images:
-        if not img.filename: continue
-        ext = img.filename.split('.')[-1]
-        fname = f"{uuid.uuid4().hex}.{ext}"
-        path = UPLOAD_DIR / fname
-        with path.open("wb") as buffer:
-            shutil.copyfileobj(img.file, buffer)
-        saved.append(f"/static/uploads/{fname}")
+        # Cek apakah img beneran objek file (bukan empty string dari frontend)
+        if hasattr(img, "filename") and img.filename:
+            ext = img.filename.split('.')[-1]
+            fname = f"{uuid.uuid4().hex}.{ext}"
+            path = UPLOAD_DIR / fname
+            with path.open("wb") as buffer:
+                shutil.copyfileobj(img.file, buffer)
+            saved.append(f"/static/uploads/{fname}")
     
     item_id = uuid.uuid4().hex[:8]
     now = datetime.now().isoformat()
@@ -157,7 +185,7 @@ async def submit_item(
         """INSERT INTO items 
            (id, nama_item, kategori, deskripsi, stok, harga, gambar, created_at)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""", 
-        (item_id, itemName, itemCategory, itemDescription, stok, harga, "|".join(saved), now)
+        (item_id, itemName, itemCategory, itemDescription, stok_int, harga_int, "|".join(saved), now)
     )
     db.commit()
     return {"ok": True, "id": item_id}
@@ -205,7 +233,6 @@ def delete_item(item_id: str, db: DBWrapper = Depends(get_db), _: str = Depends(
 
 @app.get("/api/stats")
 def stats(db: DBWrapper = Depends(get_db), _: str = Depends(require_auth)):
-    # pg8000 balikin value count() sebagai integer langsung klo di index 0 tapi key-nya pake ngambil iterasi ke row
     total_row   = db.execute("SELECT COUNT(*) FROM items").cur.fetchone()
     pending_row = db.execute("SELECT COUNT(*) FROM items WHERE status='pending'").cur.fetchone()
     aktif_row   = db.execute("SELECT COUNT(*) FROM items WHERE status='aktif'").cur.fetchone()
